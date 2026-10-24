@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="/manifest.json">
+<title>Spend Tracker</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--line:#334155;--tx:#e2e8f0;--mut:#94a3b8;--acc:#38bdf8;--ok:#22c55e;--warn:#eab308;--bad:#ef4444}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding:env(safe-area-inset-top) 0 calc(76px + env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto;padding:12px 16px}
+h2{font-size:15px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 8px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center}.grow{flex:1}.mut{color:var(--mut);font-size:13px}
+button,select,input{font:inherit;color:var(--tx);background:#0b1222;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+input,select{width:100%}button{cursor:pointer}
+.btn{background:var(--acc);color:#04263a;border:0;font-weight:600}.ghost{background:transparent}
+.danger{color:var(--bad);border-color:transparent;background:transparent;padding:6px 8px}
+.big{font-size:44px;font-weight:700;letter-spacing:-.02em}
+.bar{height:10px;background:#0b1222;border-radius:6px;overflow:hidden;margin-top:10px}.bar>i{display:block;height:100%}
+.picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.pick{text-align:left;background:var(--card);border:1px solid var(--line);padding:12px;border-radius:12px}
+.pick b{display:block}.pick span{color:var(--mut);font-size:13px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:2px 8px;border-radius:99px;background:#0b1222}
+.chip i{width:8px;height:8px;border-radius:50%}
+.chips{display:flex;flex-wrap:wrap;gap:6px}.chips button{padding:6px 10px;font-size:14px}.chips button.on{border-color:var(--acc);background:#0c2a3a}
+.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}.item:last-child{border:0}
+nav{position:fixed;bottom:0;left:0;right:0;background:#0b1222;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;padding:14px 0;color:var(--mut);border-radius:0}nav button.on{color:var(--acc)}
+.fab{position:fixed;right:18px;bottom:calc(88px + env(safe-area-inset-bottom));width:60px;height:60px;border-radius:50%;font-size:32px;line-height:1;padding:0;box-shadow:0 6px 20px #0008}
+.sheet{position:fixed;inset:0;background:#000a;display:flex;align-items:flex-end;z-index:9}
+.sheet>div{background:var(--card);width:100%;max-width:560px;margin:0 auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
+label{display:block;font-size:13px;color:var(--mut);margin:12px 0 4px}
+.seg{display:flex;background:#0b1222;border-radius:10px;padding:3px}.seg button{flex:1;border:0;background:none;padding:8px}.seg button.on{background:var(--card);color:var(--acc)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(160px + env(safe-area-inset-bottom));background:#f8fafc;color:#0f172a;padding:10px 14px;border-radius:12px;display:flex;gap:12px;align-items:center;z-index:10;box-shadow:0 6px 20px #0008}
+.toast button{background:none;border:0;color:#0369a1;font-weight:700;padding:0}
+.hbar{display:grid;grid-template-columns:70px 1fr 64px;gap:8px;align-items:center;font-size:13px;margin:6px 0}
+.hbar .t{background:#0b1222;border-radius:5px;height:14px;position:relative;overflow:hidden}.hbar .t i{position:absolute;inset:0 auto 0 0}
+.right{text-align:right}.amt{font-variant-numeric:tabular-nums;font-weight:600}
+</style>
+</head>
+<body>
+<main id="app"><p class="mut">Loading…</p></main>
+<nav id="nav" hidden>
+  <button data-v="home" onclick="go('home')">This Week</button>
+  <button data-v="reports" onclick="go('reports')">Reports</button>
+  <button data-v="settings" onclick="go('settings')">Settings</button>
+</nav>
+<div id="overlay"></div>
+<script>
+// ---------- token (kept in URL so "Add to Home Screen" keeps it) ----------
+const qs = new URLSearchParams(location.search);
+let TOKEN = qs.get('t') || (()=>{try{return localStorage.getItem('tok')}catch{}})();
+if (TOKEN) { try{localStorage.setItem('tok',TOKEN)}catch{}; if(!qs.get('t')) history.replaceState(null,'','/?t='+TOKEN); }
+
+const S = { view:'home', cache:{}, rp:{period:'week',offset:0,acct:null} };
+const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parse=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
+const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const weekStart=(d,r)=>addDays(new Date(d.getFullYear(),d.getMonth(),d.getDate()),-((d.getDay()-r+7)%7));
+const ym=d=>ymd(d).slice(0,7);
+const money=n=>(n<0?'-':'')+'$'+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:Number.isInteger(n)?0:2,maximumFractionDigits:2});
+const sum=a=>Math.round(a.reduce((s,e)=>s+e.amount,0)*100)/100;
+const today=()=>new Date();
+
+async function api(path,opt={}){
+  const r=await fetch('/api/'+path,{method:opt.method||'GET',headers:{'x-token':TOKEN||'','content-type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error||('Error '+r.status));
+  return d;
+}
+function toast(msg,undo){
+  $('.toast')?.remove();
+  const t=document.createElement('div');t.className='toast';
+  t.innerHTML=`<span>${esc(msg)}</span>`+(undo?'<button>Undo</button>':'');
+  if(undo) t.querySelector('button').onclick=()=>{t.remove();undo()};
+  document.body.append(t);setTimeout(()=>t.remove(),4000);
+}
+const fail=e=>toast(e.message||String(e));
+
+// ---------- data ----------
+async function loadState(){ Object.assign(S, await api('state')); if(!S.accounts.find(a=>a.id===S.acct)) S.acct=S.accounts[0]?.id; if(!S.rp.acct) S.rp.acct=S.acct||'all'; }
+async function loadMonths(from,to,force){
+  const months=[];let d=parse(from+'-01');const end=parse(to+'-01');
+  while(d<=end){months.push(ym(d));d=new Date(d.getFullYear(),d.getMonth()+1,1)}
+  const need=force?months:months.filter(m=>!S.cache[m]);
+  if(need.length){ const r=await api(`entries?from=${need[0]}&to=${need[need.length-1]}`); Object.assign(S.cache,r); }
+}
+const entriesIn=(a,b,acctIds)=>Object.values(S.cache).flat().filter(e=>e.date>=a&&e.date<=b&&(!acctIds||acctIds.includes(e.accountId)));
+const tag=id=>S.tags.find(t=>t.id===id)||{name:'Untagged',color:'#475569'};
+const myTags=()=>S.tags.filter(t=>!t.archived&&(t.owner===null||t.owner===S.me.id));
+const acctById=id=>S.accounts.find(a=>a.id===id);
+const canDel=e=>S.me.role==='admin'||e.userId===S.me.id;
+
+function go(v){S.view=v;render()}
+async function render(){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.view));
+  try{ if(S.view==='home') await renderHome(); else if(S.view==='reports') await renderReports(); else renderSettings(); }catch(e){fail(e)}
+}
+
+// ---------- HOME ----------
+async function renderHome(){
+  const a=acctById(S.acct);
+  if(!a){ $('#app').innerHTML=`<div class="card"><b>No budgets yet.</b><p class="mut">${S.me.role==='admin'?'Go to Settings → Budgets to create one.':'Ask '+esc(S.people.admin)+' to add you to a budget.'}</p></div>`; return; }
+  const ws=weekStart(today(),a.resetDay), we=addDays(ws,6);
+  await loadMonths(ym(ws),ym(we));
+  const list=entriesIn(ymd(ws),ymd(we),[a.id]).sort((x,y)=>y.date.localeCompare(x.date)||y.ts-x.ts);
+  const spent=sum(list), left=Math.round((a.weekly-spent)*100)/100, pct=a.weekly?Math.min(100,spent/a.weekly*100):100;
+  const col=left<0?'var(--bad)':pct>80?'var(--warn)':'var(--ok)';
+  const picks=S.picks.filter(p=>!p.accountId||p.accountId===a.id);
+  $('#app').innerHTML=`
+    ${S.accounts.length>1?`<select onchange="S.acct=this.value;render()">${S.accounts.map(x=>`<option value="${x.id}" ${x.id===a.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select>`:`<h2 style="margin-top:4px">${esc(a.name)}</h2>`}
+    <div class="card" style="margin-top:12px">
+      <div class="mut">${left<0?'Over budget':'Left this week'} · ${MON[ws.getMonth()]} ${ws.getDate()} – ${MON[we.getMonth()]} ${we.getDate()}</div>
+      <div class="big" style="color:${col}">${money(Math.abs(left))}</div>
+      <div class="mut">${money(spent)} spent of ${money(a.weekly)}</div>
+      <div class="bar"><i style="width:${pct}%;background:${col}"></i></div>
+    </div>
+    <h2>Quick picks</h2>
+    ${picks.length?`<div class="picks">${picks.map(p=>`<button class="pick" onclick="usePick('${p.id}')"><b>${esc(p.name)}</b><span>${money(p.amount)} · ${esc(tag(p.tagId).name)}</span></button>`).join('')}</div>`:`<p class="mut">Tap + and check "Save as quick pick" to add one-tap buttons for things you buy often.</p>`}
+    <h2>This week</h2>
+    <div class="card">${list.length?list.map(entryRow).join(''):'<p class="mut" style="margin:0">Nothing logged yet.</p>'}</div>
+    <button class="btn fab" onclick="openAdd()">+</button>`;
+}
+function entryRow(e){
+  const t=tag(e.tagId), d=parse(e.date);
+  return `<div class="item"><div class="grow"><div>${esc(e.note||t.name)}</div>
+    <div class="mut">${DAYS[d.getDay()]} ${d.getMonth()+1}/${d.getDate()} · ${esc(S.people[e.userId]||'?')} <span class="chip"><i style="background:${t.color}"></i>${esc(t.name)}</span></div></div>
+    <div class="right"><div class="amt">${money(e.amount)}</div>${e.exact!==e.amount?`<div class="mut">${money(e.exact)}</div>`:''}</div>
+    ${canDel(e)?`<button class="danger" onclick="delEntry('${e.date.slice(0,7)}','${e.id}')">✕</button>`:''}</div>`;
+}
+async function addEntry(body,msg){
+  const e=await api('entries',{method:'POST',body});
+  (S.cache[e.date.slice(0,7)]??=[]).push(e);
+  toast(msg||`Logged ${money(e.amount)}`,()=>delEntry(e.date.slice(0,7),e.id,true));
+  render();
+}
+async function usePick(id){
+  const p=S.picks.find(x=>x.id===id);
+  try{ await addEntry({accountId:S.acct,amount:p.amount,exact:p.exact,date:ymd(today()),tagId:p.tagId,note:p.name,pickId:p.id},`${p.name} · ${money(p.amount)}`); }catch(e){fail(e)}
+}
+async function delEntry(m,id,quiet){
+  if(!quiet&&!confirm('Delete this entry?'))return;
+  try{ await api(`entries/${m}/${id}`,{method:'DELETE'}); S.cache[m]=(S.cache[m]||[]).filter(e=>e.id!==id); render(); }catch(e){fail(e)}
+}
+
+// ---------- ADD SHEET ----------
+let F={};
+function openAdd(){
+  F={round:true,tagId:myTags()[0]?.id||null,acct:S.acct};
+  $('#overlay').innerHTML=`<div class="sheet" onclick="if(event.target===this)closeSheet()"><div>
+    <div class="row"><b class="grow" style="font-size:18px">Add spending</b><button class="ghost" onclick="closeSheet()">Cancel</button></div>
+    <label>Amount</label><input id="fAmt" inputmode="decimal" placeholder="0.00" style="font-size:28px" oninput="updRound()">
+    <div class="row" style="margin-top:8px"><label style="margin:0" class="grow"><input type="checkbox" id="fRound" checked style="width:auto" onchange="F.round=this.checked;updRound()"> Round up to whole dollar</label><span id="fPrev" class="mut"></span></div>
+    <label>Tag</label><div class="chips" id="fTags"></div>
+    <label>What / where (optional)</label><input id="fNote" placeholder="e.g. Casey's fountain soda">
+    <div class="row"><div class="grow"><label>Date</label><input type="date" id="fDate" value="${ymd(today())}"></div>
+      ${S.accounts.length>1?`<div class="grow"><label>Budget</label><select id="fAcct">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===S.acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div>`:''}</div>
+    <label><input type="checkbox" id="fPick" style="width:auto"> Save as quick pick (uses the "what / where" as its name)</label>
+    <button class="btn" style="width:100%;margin-top:16px;padding:14px" onclick="saveAdd()">Save</button>
+  </div></div>`;
+  drawTagChips();setTimeout(()=>$('#fAmt').focus(),50);
+}
+function drawTagChips(){ $('#fTags').innerHTML=myTags().map(t=>`<button class="${t.id===F.tagId?'on':''}" onclick="F.tagId='${t.id}';drawTagChips()"><span class="chip" style="background:none;padding:0"><i style="background:${t.color}"></i>${esc(t.name)}</span></button>`).join(''); }
+function amounts(){ const exact=Math.round(parseFloat(($('#fAmt').value||'').replace(/[$,]/g,''))*100)/100; return {exact, amount:F.round?Math.ceil(exact-1e-9):exact}; }
+function updRound(){ const {exact,amount}=amounts(); $('#fPrev').textContent=exact>0&&amount!==exact?`→ ${money(amount)}`:''; }
+const closeSheet=()=>$('#overlay').innerHTML='';
+async function saveAdd(){
+  const {exact,amount}=amounts(); if(!(exact>0)) return toast('Enter an amount');
+  const note=$('#fNote').value.trim(), accountId=$('#fAcct')?.value||S.acct;
+  try{
+    if($('#fPick').checked){ if(!note) return toast('Add a name for the quick pick'); S.picks.push(await api('picks',{method:'POST',body:{name:note,amount,exact,tagId:F.tagId,accountId}})); }
+    closeSheet();
+    await addEntry({accountId,amount,exact,date:$('#fDate').value,tagId:F.tagId,note});
+  }catch(e){fail(e)}
+}
+
+// ---------- REPORTS ----------
+function rpRange(){
+  const {period,offset,acct}=S.rp, t=today();
+  const reset=acct!=='all'?acctById(acct)?.resetDay??0:(S.accounts[0]?.resetDay??0);
+  if(period==='week'){ const s=addDays(weekStart(t,reset),7*offset); return {s,e:addDays(s,6),reset,label:`${MON[s.getMonth()]} ${s.getDate()} – ${MON[addDays(s,6).getMonth()]} ${addDays(s,6).getDate()}`}; }
+  if(period==='month'){ const s=new Date(t.getFullYear(),t.getMonth()+offset,1); return {s,e:new Date(s.getFullYear(),s.getMonth()+1,0),reset,label:`${MON[s.getMonth()]} ${s.getFullYear()}`}; }
+  const s=new Date(t.getFullYear()+offset,0,1); return {s,e:new Date(s.getFullYear(),11,31),reset,label:String(s.getFullYear())};
+}
+function donut(parts){
+  const tot=parts.reduce((s,p)=>s+p.value,0); if(!tot) return '';
+  let a=-Math.PI/2; const R=60,r=38,c=70;
+  const arcs=parts.map(p=>{const f=p.value/tot; if(f>=.9999) return `<circle cx="${c}" cy="${c}" r="${(R+r)/2}" fill="none" stroke="${p.color}" stroke-width="${R-r}"/>`;
+    const a2=a+f*2*Math.PI, L=f>.5?1:0, P=(rad,ang)=>`${c+rad*Math.cos(ang)} ${c+rad*Math.sin(ang)}`;
+    const d=`M${P(R,a)} A${R} ${R} 0 ${L} 1 ${P(R,a2)} L${P(r,a2)} A${r} ${r} 0 ${L} 0 ${P(r,a)}Z`; a=a2; return `<path d="${d}" fill="${p.color}"/>`}).join('');
+  return `<svg viewBox="0 0 140 140" width="140" height="140">${arcs}<text x="70" y="75" text-anchor="middle" fill="currentColor" font-size="15" font-weight="700">${money(Math.round(tot))}</text></svg>`;
+}
+function hbars(rows,max){ return rows.map(r=>`<div class="hbar"><span>${esc(r.label)}</span><div class="t"><i style="width:${max?Math.min(100,r.value/max*100):0}%;background:${r.color||'var(--acc)'}"></i></div><span class="right amt">${money(r.value)}</span></div>`).join(''); }
+async function renderReports(){
+  const {period,acct}=S.rp, R=rpRange(), A=ymd(R.s), B=ymd(R.e);
+  await loadMonths(ym(R.s),ym(R.e));
+  const accts=acct==='all'?S.accounts:[acctById(acct)].filter(Boolean), ids=accts.map(a=>a.id);
+  const list=entriesIn(A,B,ids), spent=sum(list), weekly=accts.reduce((s,a)=>s+a.weekly,0);
+  // budget = weekly × number of weeks that start inside the period
+  let weeks=[]; for(let w=weekStart(R.s,R.reset); w<=R.e; w=addDays(w,7)) if(period==='week'||w>=R.s) weeks.push(w);
+  const budget=weekly*weeks.length;
+  const byTag={}; list.forEach(e=>byTag[e.tagId||'']=(byTag[e.tagId||'']||0)+e.amount);
+  const tagRows=Object.entries(byTag).map(([id,v])=>({label:tag(id).name,value:Math.round(v*100)/100,color:tag(id).color})).sort((a,b)=>b.value-a.value);
+  const byP={}; list.forEach(e=>byP[e.userId]=(byP[e.userId]||0)+e.amount);
+  const pRows=Object.entries(byP).map(([id,v])=>({label:S.people[id]||'?',value:Math.round(v*100)/100})).sort((a,b)=>b.value-a.value);
+  let brk=[],brkMax=0,brkTitle='';
+  if(period==='week'){ brkTitle='By day'; brk=[...Array(7)].map((_,i)=>{const d=addDays(R.s,i);return{label:DAYS[d.getDay()]+' '+d.getDate(),value:sum(list.filter(e=>e.date===ymd(d)))}}); brkMax=Math.max(...brk.map(r=>r.value)); }
+  if(period==='month'){ brkTitle='By week (vs weekly budget)'; brk=weeks.map(w=>{const v=sum(entriesIn(ymd(w),ymd(addDays(w,6)),ids));return{label:`${w.getMonth()+1}/${w.getDate()}`,value:v,color:v>weekly?'var(--bad)':'var(--ok)'}}); brkMax=Math.max(weekly,...brk.map(r=>r.value)); }
+  if(period==='year'){ brkTitle='By month'; brk=MON.map((m,i)=>({label:m,value:sum(list.filter(e=>+e.date.slice(5,7)===i+1))})); brkMax=Math.max(...brk.map(r=>r.value)); }
+  if(period!=='year'||weeks.length) {}
+  const avg=weeks.length?spent/Math.max(1,period==='week'?1:weeks.filter(w=>w<=today()).length||1):0;
+  $('#app').innerHTML=`
+    <select onchange="S.rp.acct=this.value;render()"><option value="all">All my budgets</option>${S.accounts.map(a=>`<option value="${a.id}" ${a.id===acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select>
+    <div class="seg" style="margin-top:10px">${['week','month','year'].map(p=>`<button class="${p===period?'on':''}" onclick="S.rp.period='${p}';S.rp.offset=0;render()">${p[0].toUpperCase()+p.slice(1)}</button>`).join('')}</div>
+    <div class="row" style="margin:12px 0"><button class="ghost" onclick="S.rp.offset--;render()">‹</button><b class="grow" style="text-align:center">${R.label}</b><button class="ghost" onclick="S.rp.offset++;render()" ${S.rp.offset>=0?'disabled':''}>›</button></div>
+    <div class="card"><div class="row"><div class="grow"><div class="mut">Spent</div><div class="big" style="font-size:32px">${money(spent)}</div></div>
+      <div class="right"><div class="mut">Budget (${weeks.length} wk)</div><div class="amt">${money(budget)}</div><div class="mut" style="color:${spent>budget?'var(--bad)':'var(--ok)'}">${spent>budget?'Over '+money(Math.round((spent-budget)*100)/100):'Under '+money(Math.round((budget-spent)*100)/100)}</div></div></div>
+      ${period!=='week'?`<div class="mut" style="margin-top:6px">Avg ${money(Math.round(avg))}/week · ${list.length} entries</div>`:''}</div>
+    ${list.length?`<h2>By tag</h2><div class="card"><div class="row" style="align-items:center">${donut(tagRows)}<div class="grow">${tagRows.map(r=>`<div class="row" style="font-size:14px;margin:3px 0"><span class="chip" style="background:none;padding:0"><i style="background:${r.color}"></i></span><span class="grow">${esc(r.label)}</span><span class="amt">${money(r.value)}</span><span class="mut" style="width:38px;text-align:right">${Math.round(r.value/spent*100)}%</span></div>`).join('')}</div></div></div>
+    <h2>${brkTitle}</h2><div class="card">${hbars(brk,brkMax)}</div>
+    ${pRows.length>1||acct==='all'?`<h2>By person</h2><div class="card">${hbars(pRows,pRows[0]?.value)}</div>`:''}
+    <h2>Top items</h2><div class="card">${topItems(list)}</div>`:'<p class="mut">No spending in this period.</p>'}`;
+}
+function topItems(list){
+  const m={}; list.forEach(e=>{const k=(e.note||tag(e.tagId).name).toLowerCase();(m[k]??={label:e.note||tag(e.tagId).name,n:0,v:0});m[k].n++;m[k].v+=e.amount});
+  return Object.values(m).sort((a,b)=>b.v-a.v).slice(0,8).map(r=>`<div class="item"><span class="grow">${esc(r.label)} <span class="mut">×${r.n}</span></span><span class="amt">${money(Math.round(r.v*100)/100)}</span></div>`).join('');
+}
+
+// ---------- SETTINGS ----------
+function renderSettings(){
+  const admin=S.me.role==='admin', link=t=>`${location.origin}/?t=${t}`;
+  $('#app').innerHTML=`
+    <p class="mut">Signed in as <b style="color:var(--tx)">${esc(S.me.name)}</b>${admin?' (admin)':''}</p>
+    <h2>My quick picks</h2><div class="card">
+      ${S.picks.map(p=>`<div class="item"><span class="grow">${esc(p.name)} <span class="chip"><i style="background:${tag(p.tagId).color}"></i>${esc(tag(p.tagId).name)}</span></span><span class="amt">${money(p.amount)}</span><button class="danger" onclick="delPick('${p.id}')">✕</button></div>`).join('')||'<p class="mut" style="margin:0">None yet.</p>'}
+      <div class="row" style="margin-top:10px"><input id="pName" placeholder="Name" class="grow"><input id="pAmt" inputmode="decimal" placeholder="$" style="width:80px"></div>
+      <div class="row" style="margin-top:8px"><select id="pTag" class="grow">${myTags().map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><button class="btn" onclick="addPick()">Add</button></div>
+    </div>
+    <h2>Tags</h2><div class="card">
+      <div class="chips">${myTags().map(t=>`<span class="chip" style="font-size:14px;padding:5px 10px"><i style="background:${t.color}"></i>${esc(t.name)}${admin||t.owner===S.me.id?` <a onclick="delTag('${t.id}')" style="cursor:pointer;color:var(--mut)">✕</a>`:''}</span>`).join('')}</div>
+      <div class="row" style="margin-top:10px"><input id="tName" placeholder="New tag" class="grow"><input id="tCol" type="color" value="#38bdf8" style="width:52px;padding:4px"><button class="btn" onclick="addTag()">Add</button></div>
+      <p class="mut" style="margin-bottom:0">${admin?'Tags you add are shared with everyone.':'Tags you add are just for you.'}</p>
+    </div>
+    ${admin?adminHtml(link):''}
+    <h2>Install</h2><p class="mut">On iPhone: Share → Add to Home Screen. Your personal link is saved in the icon.</p>`;
+}
+function adminHtml(link){
+  const users=S.users.filter(u=>!u.revoked);
+  const memberBoxes=(a)=>users.map(u=>`<label style="display:inline-flex;gap:4px;margin-right:12px;color:var(--tx)"><input type="checkbox" class="m" value="${u.id}" style="width:auto" ${a?.members?.includes(u.id)?'checked':''}>${esc(u.name)}</label>`).join('');
+  return `<h2>Budgets (admin)</h2>
+    ${S.accounts.map(a=>`<div class="card" id="acc-${a.id}">
+      <input class="n" value="${esc(a.name)}"><div class="row" style="margin-top:8px"><input class="w" inputmode="decimal" value="${a.weekly}" style="width:110px"><select class="r grow">${DAYS.map((d,i)=>`<option value="${i}" ${i===a.resetDay?'selected':''}>Week starts ${d}</option>`).join('')}</select></div>
+      <label>Who can use it</label>${memberBoxes(a)||'<span class="mut">Add people below first.</span>'}
+      <div class="row" style="margin-top:10px"><button class="btn grow" onclick="saveAcct('${a.id}')">Save</button><button class="danger" onclick="delAcct('${a.id}')">Archive</button></div></div>`).join('')}
+    <div class="card" id="acc-new"><b>New budget</b><input class="n" placeholder="e.g. Household, Kyle, Daughter" style="margin-top:8px">
+      <div class="row" style="margin-top:8px"><input class="w" inputmode="decimal" placeholder="Weekly $" style="width:110px"><select class="r grow">${DAYS.map((d,i)=>`<option value="${i}">Week starts ${d}</option>`).join('')}</select></div>
+      <label>Who can use it</label>${memberBoxes()||'<span class="mut">No one else yet (you always see everything).</span>'}
+      <button class="btn" style="width:100%;margin-top:10px" onclick="saveAcct()">Create budget</button></div>
+    <h2>People & links (admin)</h2><div class="card">
+      ${users.map(u=>`<div class="item"><span class="grow">${esc(u.name)}</span><button onclick="shareLink('${esc(u.name)}','${link(u.token)}')">Share link</button><button class="danger" onclick="rotate('${u.id}')">New link</button><button class="danger" onclick="revoke('${u.id}')">✕</button></div>`).join('')||'<p class="mut" style="margin:0">No one added yet.</p>'}
+      <div class="row" style="margin-top:10px"><input id="uName" placeholder="Name (e.g. wife's name)" class="grow"><button class="btn" onclick="addUser()">Add</button></div>
+      <p class="mut" style="margin-bottom:0">"New link" kills the old one — use it if a link gets shared by accident.</p></div>`;
+}
+const num=v=>parseFloat(String(v).replace(/[$,]/g,''));
+const act=async(fn)=>{try{await fn();await loadState();render()}catch(e){fail(e)}};
+const addPick=()=>act(()=>{const a=num($('#pAmt').value);return api('picks',{method:'POST',body:{name:$('#pName').value,amount:a,exact:a,tagId:$('#pTag').value}})});
+const delPick=id=>act(()=>api('picks/'+id,{method:'DELETE'}));
+const addTag=()=>act(()=>api('tags',{method:'POST',body:{name:$('#tName').value,color:$('#tCol').value}}));
+const delTag=id=>confirm('Remove this tag? Past entries keep it.')&&act(()=>api('tags/'+id,{method:'DELETE'}));
+const addUser=()=>act(()=>api('users',{method:'POST',body:{name:$('#uName').value}}));
+const rotate=id=>confirm('Make a new link? The old one stops working.')&&act(()=>api(`users/${id}/rotate`,{method:'POST'}));
+const revoke=id=>confirm('Remove this person\'s access?')&&act(()=>api('users/'+id,{method:'DELETE'}));
+const delAcct=id=>confirm('Archive this budget?')&&act(()=>api('accounts/'+id,{method:'DELETE'}));
+function saveAcct(id){ const c=$('#acc-'+(id||'new'));
+  const body={name:c.querySelector('.n').value,weekly:num(c.querySelector('.w').value),resetDay:+c.querySelector('.r').value,members:[...c.querySelectorAll('.m:checked')].map(x=>x.value)};
+  act(()=>api('accounts'+(id?'/'+id:''),{method:id?'PUT':'POST',body})).then(()=>toast('Saved')); }
+async function shareLink(name,url){
+  if(navigator.share){try{await navigator.share({title:'Spending tracker',text:`${name}, here's your spending tracker link:`,url});return}catch{}}
+  try{await navigator.clipboard.writeText(url);toast('Link copied')}catch{prompt('Copy this link:',url)}
+}
+
+// ---------- boot ----------
+(async()=>{
+  if(!TOKEN){ $('#app').innerHTML='<div class="card"><b>No access link.</b><p class="mut">Open this app using the personal link you were sent.</p></div>'; return; }
+  try{ await loadState(); $('#nav').hidden=false; render(); }
+  catch(e){ $('#app').innerHTML=`<div class="card"><b>Can't sign in.</b><p class="mut">${esc(e.message)}</p></div>`; }
+  document.addEventListener('visibilitychange',async()=>{ if(!document.hidden&&S.me){ const t=today(); await loadMonths(ym(addDays(t,-7)),ym(t),true).catch(()=>{}); if(S.view!=='settings') render(); }});
+})();
+</script>
+</body>
+</html>
