@@ -176,11 +176,12 @@ function updRound(){ const {exact,amount}=amounts(); $('#fPrev').textContent=exa
 const closeSheet=()=>$('#overlay').innerHTML='';
 async function saveAdd(){
   const {exact,amount}=amounts(); if(!(exact>0)) return toast('Enter an amount');
-  const note=$('#fNote').value.trim(), accountId=$('#fAcct')?.value||S.acct;
+  const note=$('#fNote').value.trim(), accountId=$('#fAcct')?.value||S.acct, date=$('#fDate').value||ymd(today()), mkPick=$('#fPick').checked;
+  if(mkPick&&!note) return toast('Add a name for the quick pick');
   try{
-    if($('#fPick').checked){ if(!note) return toast('Add a name for the quick pick'); S.picks.push(await api('picks',{method:'POST',body:{name:note,amount,exact,tagId:F.tagId,accountId}})); }
     closeSheet();
-    await addEntry({accountId,amount,exact,date:$('#fDate').value,tagId:F.tagId,note});
+    await addEntry({accountId,amount,exact,date,tagId:F.tagId,note});
+    if(mkPick){ S.picks.push(await api('picks',{method:'POST',body:{name:note,amount,exact,tagId:F.tagId,accountId}})); render(); }
   }catch(e){fail(e)}
 }
 
