@@ -126,15 +126,18 @@ async function renderHome(){
       <div class="bar"><i style="width:${pct}%;background:${col}"></i></div>
     </div>
     <h2>Quick picks</h2>
-    ${picks.length?`<div class="picks">${picks.map(p=>`<button class="pick" onclick="usePick('${p.id}')"><b>${esc(p.name)}</b><span>${money(p.amount)} · ${esc(tag(p.tagId).name)}</span></button>`).join('')}</div>`:`<p class="mut">Tap + and check "Save as quick pick" to add one-tap buttons for things you buy often.</p>`}
+    ${picks.length?`<div class="picks">${picks.map(p=>`<button class="pick" onclick="usePick('${p.id}')"><b>${esc(p.name)}</b><span>${p.amount?money(p.amount)+' · ':''}${esc(tag(p.tagId).name)}</span></button>`).join('')}</div>`:`<p class="mut">Tap + and check "Save as quick pick" to add one-tap buttons for things you buy often.</p>`}
     <h2>This week</h2>
     <div class="card">${list.length?list.map(entryRow).join(''):'<p class="mut" style="margin:0">Nothing logged yet.</p>'}</div>
     <button class="btn fab" onclick="openAdd()">+</button>`;
 }
+const partsOf=e=>e.splits?.length?e.splits:[{tagId:e.tagId,amount:e.amount}];
 function entryRow(e){
-  const t=tag(e.tagId), d=parse(e.date);
+  const t=tag(e.tagId), d=parse(e.date), parts=partsOf(e);
+  const chips=parts.map(s=>{const g=tag(s.tagId);return `<span class="chip"><i style="background:${g.color}"></i>${esc(g.name)}${parts.length>1?' '+money(s.amount):''}</span>`}).join(' ');
   return `<div class="item"><div class="grow"><div>${esc(e.note||t.name)}</div>
-    <div class="mut">${DAYS[d.getDay()]} ${d.getMonth()+1}/${d.getDate()} · ${esc(S.people[e.userId]||'?')} <span class="chip"><i style="background:${t.color}"></i>${esc(t.name)}</span></div></div>
+    <div class="mut">${DAYS[d.getDay()]} ${d.getMonth()+1}/${d.getDate()} · ${esc(S.people[e.userId]||'?')} ${chips}</div>
+    ${e.comment?`<div class="mut" style="font-style:italic;margin-top:2px">${esc(e.comment)}</div>`:''}</div>
     <div class="right"><div class="amt">${money(e.amount)}</div>${e.exact!==e.amount?`<div class="mut">${money(e.exact)}</div>`:''}</div>
     ${canDel(e)?`<button class="danger" onclick="delEntry('${e.date.slice(0,7)}','${e.id}')">✕</button>`:''}</div>`;
 }
@@ -144,10 +147,7 @@ async function addEntry(body,msg){
   toast(msg||`Logged ${money(e.amount)}`,()=>delEntry(e.date.slice(0,7),e.id,true));
   render();
 }
-async function usePick(id){
-  const p=S.picks.find(x=>x.id===id);
-  try{ await addEntry({accountId:S.acct,amount:p.amount,exact:p.exact,date:ymd(today()),tagId:p.tagId,note:p.name,pickId:p.id},`${p.name} · ${money(p.amount)}`); }catch(e){fail(e)}
-}
+function usePick(id){ const p=S.picks.find(x=>x.id===id); if(p) openAdd(p); }
 async function delEntry(m,id,quiet){
   if(!quiet&&!confirm('Delete this entry?'))return;
   try{ await api(`entries/${m}/${id}`,{method:'DELETE'}); S.cache[m]=(S.cache[m]||[]).filter(e=>e.id!==id); render(); }catch(e){fail(e)}
@@ -155,33 +155,61 @@ async function delEntry(m,id,quiet){
 
 // ---------- ADD SHEET ----------
 let F={};
-function openAdd(){
-  F={round:true,tagId:myTags()[0]?.id||null,acct:S.acct};
+function openAdd(p){
+  const acct=p?.accountId&&acctById(p.accountId)?p.accountId:S.acct;
+  F={round:true,tags:[p?p.tagId:myTags()[0]?.id].filter(Boolean),split:{},acct,pickId:p?.id||null};
   $('#overlay').innerHTML=`<div class="sheet" onclick="if(event.target===this)closeSheet()"><div>
-    <div class="row"><b class="grow" style="font-size:18px">Add spending</b><button class="ghost" onclick="closeSheet()">Cancel</button></div>
-    <label>Amount</label><input id="fAmt" inputmode="decimal" placeholder="0.00" style="font-size:28px" oninput="updRound()">
+    <div class="row"><b class="grow" style="font-size:18px">${p?esc(p.name):'Add spending'}</b><button class="ghost" onclick="closeSheet()">Cancel</button></div>
+    <label>Amount</label><input id="fAmt" inputmode="decimal" placeholder="0.00" style="font-size:28px" oninput="updRound()" onfocus="this.select()" value="${p?.amount?(p.exact||p.amount):''}">
     <div class="row" style="margin-top:8px"><label style="margin:0" class="grow"><input type="checkbox" id="fRound" checked style="width:auto" onchange="F.round=this.checked;updRound()"> Round up to whole dollar</label><span id="fPrev" class="mut"></span></div>
-    <label>Tag</label><div class="chips" id="fTags"></div>
-    <label>What / where (optional)</label><input id="fNote" placeholder="e.g. Casey's fountain soda">
+    <label>Tag <span style="opacity:.7">(tap more than one to split)</span></label><div class="chips" id="fTags"></div><div id="fSplit"></div>
+    <label>What / where (optional)</label><input id="fNote" placeholder="e.g. Casey's fountain soda" value="${p?esc(p.name):''}">
+    <label>Comments (optional)</label><textarea id="fCom" rows="2" placeholder="Anything worth remembering" style="width:100%;font:inherit;color:var(--tx);background:#0b1222;border:1px solid var(--line);border-radius:10px;padding:10px 12px"></textarea>
     <div class="row"><div class="grow"><label>Date</label><input type="date" id="fDate" value="${ymd(today())}"></div>
-      ${S.accounts.length>1?`<div class="grow"><label>Budget</label><select id="fAcct">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===S.acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div>`:''}</div>
-    <label><input type="checkbox" id="fPick" style="width:auto"> Save as quick pick (uses the "what / where" as its name)</label>
+      ${S.accounts.length>1?`<div class="grow"><label>Budget</label><select id="fAcct">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div>`:''}</div>
+    ${p?'':`<label><input type="checkbox" id="fPick" style="width:auto"> Save as quick pick (uses the "what / where" as its name)</label>`}
     <button class="btn" style="width:100%;margin-top:16px;padding:14px" onclick="saveAdd()">Save</button>
   </div></div>`;
-  drawTagChips();setTimeout(()=>$('#fAmt').focus(),50);
+  drawTagChips();updRound();setTimeout(()=>{const a=$('#fAmt');a.focus();a.select()},50);
 }
-function drawTagChips(){ $('#fTags').innerHTML=myTags().map(t=>`<button class="${t.id===F.tagId?'on':''}" onclick="F.tagId='${t.id}';drawTagChips()"><span class="chip" style="background:none;padding:0"><i style="background:${t.color}"></i>${esc(t.name)}</span></button>`).join(''); }
-function amounts(){ const exact=Math.round(parseFloat(($('#fAmt').value||'').replace(/[$,]/g,''))*100)/100; return {exact, amount:F.round?Math.ceil(exact-1e-9):exact}; }
-function updRound(){ const {exact,amount}=amounts(); $('#fPrev').textContent=exact>0&&amount!==exact?`→ ${money(amount)}`:''; }
+function toggleTag(id){ F.tags=F.tags.includes(id)?F.tags.filter(x=>x!==id):[...F.tags,id]; drawTagChips(); }
+function drawTagChips(){
+  $('#fTags').innerHTML=myTags().map(t=>`<button class="${F.tags.includes(t.id)?'on':''}" onclick="toggleTag('${t.id}')"><span class="chip" style="background:none;padding:0"><i style="background:${t.color}"></i>${esc(t.name)}</span></button>`).join('');
+  $('#fSplit').innerHTML=F.tags.length>1?`<div class="card" style="background:#0b1222;margin:10px 0 0;padding:10px">
+    ${F.tags.map(id=>`<div class="row" style="margin:4px 0"><span class="grow"><span class="chip"><i style="background:${tag(id).color}"></i>${esc(tag(id).name)}</span></span><input inputmode="decimal" placeholder="$" style="width:100px" value="${F.split[id]??''}" oninput="F.split['${id}']=this.value;updRound()"></div>`).join('')}
+    <div class="mut" id="fLeft" style="margin-top:6px"></div></div>`:'';
+  updRound();
+}
+const n2=v=>{const x=Math.round(parseFloat(String(v??'').replace(/[$,]/g,''))*100)/100;return Number.isFinite(x)?x:NaN};
+function amounts(){ const exact=n2($('#fAmt').value); return {exact, amount:F.round?Math.ceil(exact-1e-9):exact}; }
+// Build split list in "counted" dollars. One blank row gets the remainder; rounding extra goes to the largest piece.
+function buildSplits(exact,amount){
+  if(F.tags.length<2) return {ok:true,splits:null};
+  const vals=F.tags.map(id=>({tagId:id,amount:n2(F.split[id])}));
+  const blanks=vals.filter(v=>!(v.amount>=0)), filled=Math.round(vals.filter(v=>v.amount>=0).reduce((s,v)=>s+v.amount,0)*100)/100;
+  const left=Math.round((exact-filled)*100)/100;
+  if(blanks.length>1) return {ok:false,msg:`${money(left)} left to assign — fill all but one tag`};
+  if(blanks.length===1){ if(left<0) return {ok:false,msg:`Splits are over by ${money(-left)}`}; blanks[0].amount=left; }
+  else if(Math.abs(left)>0.005) return {ok:false,msg:left>0?`${money(left)} not assigned yet`:`Splits are over by ${money(-left)}`};
+  const extra=Math.round((amount-exact)*100)/100;
+  if(extra){ const big=vals.reduce((a,b)=>b.amount>a.amount?b:a); big.amount=Math.round((big.amount+extra)*100)/100; }
+  return {ok:true,splits:vals,msg:blanks.length?`${esc(tag(blanks[0].tagId).name)} gets the remaining ${money(left)}`:'Splits add up ✓'};
+}
+function updRound(){
+  const {exact,amount}=amounts(); $('#fPrev').textContent=exact>0&&amount!==exact?`→ ${money(amount)}`:'';
+  const el=$('#fLeft'); if(el){ const r=exact>0?buildSplits(exact,amount):{msg:'Enter the total first'}; el.innerHTML=r.msg||''; el.style.color=r.ok===false?'var(--warn)':''; }
+}
 const closeSheet=()=>$('#overlay').innerHTML='';
 async function saveAdd(){
   const {exact,amount}=amounts(); if(!(exact>0)) return toast('Enter an amount');
-  const note=$('#fNote').value.trim(), accountId=$('#fAcct')?.value||S.acct, date=$('#fDate').value||ymd(today()), mkPick=$('#fPick').checked;
+  const note=$('#fNote').value.trim(), accountId=$('#fAcct')?.value||S.acct, date=$('#fDate').value||ymd(today()), mkPick=!!$('#fPick')?.checked;
   if(mkPick&&!note) return toast('Add a name for the quick pick');
+  const sp=buildSplits(exact,amount); if(!sp.ok) return toast(sp.msg);
+  const comment=$('#fCom').value.trim(), tagId=F.tags[0]||null;
   try{
     closeSheet();
-    await addEntry({accountId,amount,exact,date,tagId:F.tagId,note});
-    if(mkPick){ S.picks.push(await api('picks',{method:'POST',body:{name:note,amount,exact,tagId:F.tagId,accountId}})); render(); }
+    await addEntry({accountId,amount,exact,date,tagId,splits:sp.splits,note,comment,pickId:F.pickId});
+    if(mkPick){ S.picks.push(await api('picks',{method:'POST',body:{name:note,amount,exact,tagId,accountId}})); render(); }
   }catch(e){fail(e)}
 }
 
@@ -210,7 +238,7 @@ async function renderReports(){
   // budget = weekly × number of weeks that start inside the period
   let weeks=[]; for(let w=weekStart(R.s,R.reset); w<=R.e; w=addDays(w,7)) if(period==='week'||w>=R.s) weeks.push(w);
   const budget=weekly*weeks.length;
-  const byTag={}; list.forEach(e=>byTag[e.tagId||'']=(byTag[e.tagId||'']||0)+e.amount);
+  const byTag={}; list.forEach(e=>partsOf(e).forEach(s=>byTag[s.tagId||'']=(byTag[s.tagId||'']||0)+s.amount));
   const tagRows=Object.entries(byTag).map(([id,v])=>({label:tag(id).name,value:Math.round(v*100)/100,color:tag(id).color})).sort((a,b)=>b.value-a.value);
   const byP={}; list.forEach(e=>byP[e.userId]=(byP[e.userId]||0)+e.amount);
   const pRows=Object.entries(byP).map(([id,v])=>({label:S.people[id]||'?',value:Math.round(v*100)/100})).sort((a,b)=>b.value-a.value);
@@ -243,8 +271,8 @@ function renderSettings(){
   $('#app').innerHTML=`
     <p class="mut">Signed in as <b style="color:var(--tx)">${esc(S.me.name)}</b>${admin?' (admin)':''}</p>
     <h2>My quick picks</h2><div class="card">
-      ${S.picks.map(p=>`<div class="item"><span class="grow">${esc(p.name)} <span class="chip"><i style="background:${tag(p.tagId).color}"></i>${esc(tag(p.tagId).name)}</span></span><span class="amt">${money(p.amount)}</span><button class="danger" onclick="delPick('${p.id}')">✕</button></div>`).join('')||'<p class="mut" style="margin:0">None yet.</p>'}
-      <div class="row" style="margin-top:10px"><input id="pName" placeholder="Name" class="grow"><input id="pAmt" inputmode="decimal" placeholder="$" style="width:80px"></div>
+      ${S.picks.map(p=>`<div class="item"><span class="grow">${esc(p.name)} <span class="chip"><i style="background:${tag(p.tagId).color}"></i>${esc(tag(p.tagId).name)}</span></span><span class="amt">${p.amount?money(p.amount):''}</span><button class="danger" onclick="delPick('${p.id}')">✕</button></div>`).join('')||'<p class="mut" style="margin:0">None yet.</p>'}
+      <div class="row" style="margin-top:10px"><input id="pName" placeholder="Store / item (e.g. Casey's)" class="grow"><input id="pAmt" inputmode="decimal" placeholder="$ opt." style="width:80px"></div>
       <div class="row" style="margin-top:8px"><select id="pTag" class="grow">${myTags().map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><button class="btn" onclick="addPick()">Add</button></div>
     </div>
     <h2>Tags</h2><div class="card">

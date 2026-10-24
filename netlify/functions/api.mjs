@@ -113,9 +113,17 @@ export default async (req) => {
         if (!vis.has(body.accountId)) throw new HttpErr(403, "No access to account");
         if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date || "")) throw new HttpErr(400, "Bad date");
         if (!(amount > 0) || amount > 100000) throw new HttpErr(400, "Bad amount");
+        // optional split across tags: [{tagId, amount}]
+        let splits = null;
+        if (Array.isArray(body.splits) && body.splits.length > 1) {
+          splits = body.splits.slice(0, 10).map((s) => ({ tagId: String(s.tagId || ""), amount: num(s.amount) }));
+          if (splits.some((s) => !s.tagId || !(s.amount >= 0))) throw new HttpErr(400, "Bad split");
+          if (Math.abs(splits.reduce((t, s) => t + s.amount, 0) - amount) > 0.011) throw new HttpErr(400, "Splits must add up to the total");
+        }
         const e = {
           id: rid(), accountId: body.accountId, userId: me.id, amount, exact,
-          date: body.date, tagId: body.tagId || null, note: clean(body.note, 120),
+          date: body.date, tagId: splits ? splits[0].tagId : body.tagId || null, splits,
+          note: clean(body.note, 120), comment: clean(body.comment, 500),
           pickId: body.pickId || null, ts: Date.now(),
         };
         await mutate(`entries/${e.date.slice(0, 7)}`, () => [], (arr) => { arr.push(e); });
@@ -155,9 +163,9 @@ export default async (req) => {
     // ---- quick picks ----
     if (res === "picks") {
       if (method === "POST") {
-        const amount = num(body.amount);
-        if (!clean(body.name, 40) || !(amount > 0)) throw new HttpErr(400, "Name and amount required");
-        const p = { id: rid(8), owner: me.id, name: clean(body.name, 40), amount, exact: num(body.exact ?? amount), tagId: body.tagId || null, accountId: body.accountId || null };
+        const amount = num(body.amount) > 0 ? num(body.amount) : null; // amount optional
+        if (!clean(body.name, 40)) throw new HttpErr(400, "Name required");
+        const p = { id: rid(8), owner: me.id, name: clean(body.name, 40), amount, exact: amount ? num(body.exact ?? amount) : null, tagId: body.tagId || null, accountId: body.accountId || null };
         await mutate(CFG, initCfg, (c) => { c.picks.push(p); });
         return json(p);
       }
