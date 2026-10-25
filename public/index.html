@@ -17,7 +17,9 @@ h2{font-size:15px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em
 .card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
 .row{display:flex;gap:8px;align-items:center}.grow{flex:1}.mut{color:var(--mut);font-size:13px}
 button,select,input{font:inherit;color:var(--tx);background:#0b1222;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-input,select{width:100%}button{cursor:pointer}
+input,select{width:100%;min-width:0}.grow{min-width:0}
+input[type=date]{-webkit-appearance:none;appearance:none;display:block;height:48px;text-align:left}
+select{height:48px}button{cursor:pointer}
 .btn{background:var(--acc);color:#04263a;border:0;font-weight:600}.ghost{background:transparent}
 .danger{color:var(--bad);border-color:transparent;background:transparent;padding:6px 8px}
 .big{font-size:44px;font-weight:700;letter-spacing:-.02em}
@@ -97,7 +99,9 @@ async function loadMonths(from,to,force){
 }
 const entriesIn=(a,b,acctIds)=>Object.values(S.cache).flat().filter(e=>e.date>=a&&e.date<=b&&(!acctIds||acctIds.includes(e.accountId)));
 const tag=id=>S.tags.find(t=>t.id===id)||{name:'Untagged',color:'#475569'};
-const myTags=()=>S.tags.filter(t=>!t.archived&&(t.owner===null||t.owner===S.me.id));
+// Tags: starter tags (no budget) show everywhere; created tags belong to one budget
+const tagsFor=acctId=>S.tags.filter(t=>!t.archived&&(!t.accountId||t.accountId===acctId));
+const myTags=()=>tagsFor(F.acct||S.acct);
 const acctById=id=>S.accounts.find(a=>a.id===id);
 const canDel=e=>S.me.role==='admin'||e.userId===S.me.id;
 
@@ -157,7 +161,7 @@ async function delEntry(m,id,quiet){
 let F={};
 function openAdd(p){
   const acct=p?.accountId&&acctById(p.accountId)?p.accountId:S.acct;
-  F={round:true,tags:[p?p.tagId:myTags()[0]?.id].filter(Boolean),split:{},acct,pickId:p?.id||null};
+  F={round:true,tags:[p?p.tagId:tagsFor(acct)[0]?.id].filter(Boolean),split:{},acct,pickId:p?.id||null};
   $('#overlay').innerHTML=`<div class="sheet" onclick="if(event.target===this)closeSheet()"><div>
     <div class="row"><b class="grow" style="font-size:18px">${p?esc(p.name):'Add spending'}</b><button class="ghost" onclick="closeSheet()">Cancel</button></div>
     <label>Amount</label><input id="fAmt" inputmode="decimal" placeholder="0.00" style="font-size:28px" oninput="updRound()" onfocus="this.select()" value="${p?.amount?(p.exact||p.amount):''}">
@@ -166,7 +170,7 @@ function openAdd(p){
     <label>What / where (optional)</label><input id="fNote" placeholder="e.g. Casey's fountain soda" value="${p?esc(p.name):''}">
     <label>Comments (optional)</label><textarea id="fCom" rows="2" placeholder="Anything worth remembering" style="width:100%;font:inherit;color:var(--tx);background:#0b1222;border:1px solid var(--line);border-radius:10px;padding:10px 12px"></textarea>
     <div class="row"><div class="grow"><label>Date</label><input type="date" id="fDate" value="${ymd(today())}"></div>
-      ${S.accounts.length>1?`<div class="grow"><label>Budget</label><select id="fAcct">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div>`:''}</div>
+      ${S.accounts.length>1?`<div class="grow"><label>Budget</label><select id="fAcct" onchange="F.acct=this.value;F.tags=F.tags.filter(id=>tagsFor(F.acct).some(t=>t.id===id));drawTagChips()">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div>`:''}</div>
     ${p?'':`<label><input type="checkbox" id="fPick" style="width:auto"> Save as quick pick (uses the "what / where" as its name)</label>`}
     <button class="btn" style="width:100%;margin-top:16px;padding:14px" onclick="saveAdd()">Save</button>
   </div></div>`;
@@ -273,12 +277,13 @@ function renderSettings(){
     <h2>My quick picks</h2><div class="card">
       ${S.picks.map(p=>`<div class="item"><span class="grow">${esc(p.name)} <span class="chip"><i style="background:${tag(p.tagId).color}"></i>${esc(tag(p.tagId).name)}</span></span><span class="amt">${p.amount?money(p.amount):''}</span><button class="danger" onclick="delPick('${p.id}')">✕</button></div>`).join('')||'<p class="mut" style="margin:0">None yet.</p>'}
       <div class="row" style="margin-top:10px"><input id="pName" placeholder="Store / item (e.g. Casey's)" class="grow"><input id="pAmt" inputmode="decimal" placeholder="$ opt." style="width:80px"></div>
-      <div class="row" style="margin-top:8px"><select id="pTag" class="grow">${myTags().map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><button class="btn" onclick="addPick()">Add</button></div>
+      <div class="row" style="margin-top:8px"><select id="pTag" class="grow">${tagsFor(S.acct).map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><button class="btn" onclick="addPick()">Add</button></div>
     </div>
     <h2>Tags</h2><div class="card">
-      <div class="chips">${myTags().map(t=>`<span class="chip" style="font-size:14px;padding:5px 10px"><i style="background:${t.color}"></i>${esc(t.name)}${admin||t.owner===S.me.id?` <a onclick="delTag('${t.id}')" style="cursor:pointer;color:var(--mut)">✕</a>`:''}</span>`).join('')}</div>
+      ${S.accounts.length>1?`<select id="tAcct" onchange="S.tAcct=this.value;render()" style="margin-bottom:10px">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===(S.tAcct||S.acct)?'selected':''}>Tags for: ${esc(a.name)}</option>`).join('')}</select>`:''}
+      <div class="chips">${tagsFor(S.tAcct||S.acct).map(t=>`<span class="chip" style="font-size:14px;padding:5px 10px"><i style="background:${t.color}"></i>${esc(t.name)}${admin||t.owner===S.me.id?` <a onclick="delTag('${t.id}')" style="cursor:pointer;color:var(--mut)">✕</a>`:''}</span>`).join('')}</div>
       <div class="row" style="margin-top:10px"><input id="tName" placeholder="New tag" class="grow"><input id="tCol" type="color" value="#38bdf8" style="width:52px;padding:4px"><button class="btn" onclick="addTag()">Add</button></div>
-      <p class="mut" style="margin-bottom:0">${admin?'Tags you add are shared with everyone.':'Tags you add are just for you.'}</p>
+      <p class="mut" style="margin-bottom:0">New tags belong to the budget selected above and are shared with everyone on that budget.</p>
     </div>
     ${admin?adminHtml(link):''}
     <h2>Install</h2><p class="mut">On iPhone: Share → Add to Home Screen. Your personal link is saved in the icon.</p>`;
@@ -304,7 +309,7 @@ const num=v=>parseFloat(String(v).replace(/[$,]/g,''));
 const act=async(fn)=>{try{await fn();await loadState();render()}catch(e){fail(e)}};
 const addPick=()=>act(()=>{const a=num($('#pAmt').value);return api('picks',{method:'POST',body:{name:$('#pName').value,amount:a,exact:a,tagId:$('#pTag').value}})});
 const delPick=id=>act(()=>api('picks/'+id,{method:'DELETE'}));
-const addTag=()=>act(()=>api('tags',{method:'POST',body:{name:$('#tName').value,color:$('#tCol').value}}));
+const addTag=()=>act(()=>api('tags',{method:'POST',body:{name:$('#tName').value,color:$('#tCol').value,accountId:S.tAcct||S.acct}}));
 const delTag=id=>confirm('Remove this tag? Past entries keep it.')&&act(()=>api('tags/'+id,{method:'DELETE'}));
 const addUser=()=>act(()=>api('users',{method:'POST',body:{name:$('#uName').value}}));
 const rotate=id=>confirm('Make a new link? The old one stops working.')&&act(()=>api(`users/${id}/rotate`,{method:'POST'}));
@@ -323,7 +328,7 @@ async function shareLink(name,url){
   if(!TOKEN){ $('#app').innerHTML='<div class="card"><b>No access link.</b><p class="mut">Open this app using the personal link you were sent.</p></div>'; return; }
   try{ await loadState(); $('#nav').hidden=false; render(); }
   catch(e){ $('#app').innerHTML=`<div class="card"><b>Can't sign in.</b><p class="mut">${esc(e.message)}</p></div>`; }
-  document.addEventListener('visibilitychange',async()=>{ if(!document.hidden&&S.me){ const t=today(); await loadMonths(ym(addDays(t,-7)),ym(t),true).catch(()=>{}); if(S.view!=='settings') render(); }});
+  document.addEventListener('visibilitychange',async()=>{ if(!document.hidden&&S.me){ const t=today(); await loadState().catch(()=>{}); await loadMonths(ym(addDays(t,-7)),ym(t),true).catch(()=>{}); if(S.view!=='settings') render(); }});
 })();
 </script>
 </body>

@@ -90,7 +90,8 @@ export default async (req) => {
       return json({
         me, people,
         accounts: visibleAccounts(cfg, me),
-        tags: cfg.tags,
+        tags: (() => { const v = new Set(visibleAccounts(cfg, me).map((a) => a.id));
+          return cfg.tags.filter((t) => !t.accountId || v.has(t.accountId)); })(),
         picks: cfg.picks.filter((p) => p.owner === me.id),
         users: admin ? cfg.users : undefined,
       });
@@ -145,7 +146,9 @@ export default async (req) => {
     if (res === "tags") {
       if (method === "POST") {
         if (!clean(body.name, 30)) throw new HttpErr(400, "Name required");
-        const t = { id: rid(8), name: clean(body.name, 30), color: /^#[0-9a-f]{6}$/i.test(body.color) ? body.color : "#64748b", owner: admin ? null : me.id };
+        const t = { id: rid(8), name: clean(body.name, 30), color: /^#[0-9a-f]{6}$/i.test(body.color) ? body.color : "#64748b", owner: admin ? null : me.id,
+          accountId: visibleAccounts(cfg, me).some((a) => a.id === body.accountId) ? body.accountId : null };
+        if (!admin && !t.accountId) throw new HttpErr(400, "Pick a budget for the tag");
         await mutate(CFG, initCfg, (c) => { c.tags.push(t); });
         return json(t);
       }
