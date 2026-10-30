@@ -109,7 +109,7 @@ export default async (req) => {
         months.forEach((m, i) => (out[m] = (lists[i] || []).filter((e) => vis.has(e.accountId))));
         return json(out);
       }
-      if (method === "POST") {
+      if (method === "POST" || method === "PUT") {
         const amount = num(body.amount), exact = num(body.exact ?? body.amount);
         if (!vis.has(body.accountId)) throw new HttpErr(403, "No access to account");
         if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date || "")) throw new HttpErr(400, "Bad date");
@@ -127,6 +127,21 @@ export default async (req) => {
           note: clean(body.note, 120), comment: clean(body.comment, 500),
           pickId: body.pickId || null, ts: Date.now(),
         };
+        if (method === "PUT") {
+          // edit: entries/:month/:id — remove old copy (may move months if date changed), keep id/owner
+          if (!/^\d{4}-\d{2}$/.test(id || "")) throw new HttpErr(400, "Bad month");
+          let old;
+          await mutate(`entries/${id}`, () => [], (arr) => {
+            const i = arr.findIndex((x) => x.id === sub);
+            if (i < 0) throw new HttpErr(404, "Entry not found");
+            if (!admin && arr[i].userId !== me.id) throw new HttpErr(403, "Not your entry");
+            old = arr[i];
+            Object.assign(e, { id: old.id, userId: old.userId, ts: old.ts, pickId: old.pickId, edited: Date.now() });
+            if (e.date.slice(0, 7) === id) arr[i] = e; else arr.splice(i, 1);
+          });
+          if (e.date.slice(0, 7) !== id) await mutate(`entries/${e.date.slice(0, 7)}`, () => [], (arr) => { arr.push(e); });
+          return json(e);
+        }
         await mutate(`entries/${e.date.slice(0, 7)}`, () => [], (arr) => { arr.push(e); });
         return json(e);
       }
