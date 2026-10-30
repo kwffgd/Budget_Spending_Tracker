@@ -167,7 +167,10 @@ async function delEntry(m,id,quiet){
 let F={};
 function openAdd(p,e){
   const acct=e?e.accountId:p?.accountId&&acctById(p.accountId)?p.accountId:S.acct;
-  F={round:true,tags:[p?p.tagId:tagsFor(acct)[0]?.id].filter(Boolean),split:{},acct,pickId:p?.id||null,edit:null};
+  // new entry: pre-select the last tag used on this budget (or nothing)
+  const last=(()=>{try{return JSON.parse(localStorage.getItem('lastTag')||'{}')[acct]}catch{return null}})();
+  const startTag=p?p.tagId:(tagsFor(acct).some(t=>t.id===last)?last:null);
+  F={round:true,tags:[startTag].filter(Boolean),split:{},acct,pickId:p?.id||null,edit:null};
   if(e){
     const parts=partsOf(e);
     F.edit=e; F.tags=parts.map(s=>s.tagId).filter(Boolean);
@@ -233,6 +236,7 @@ async function saveAdd(){
       S.cache[m]=(S.cache[m]||[]).filter(x=>x.id!==old.id); (S.cache[e.date.slice(0,7)]??=[]).push(e);
       toast('Entry updated'); return render();
     }
+    if(tagId&&!sp.splits) try{const m=JSON.parse(localStorage.getItem('lastTag')||'{}');m[accountId]=tagId;localStorage.setItem('lastTag',JSON.stringify(m))}catch{}
     await addEntry({accountId,amount,exact,date,tagId,splits:sp.splits,note,comment,pickId:F.pickId});
     if(mkPick){ S.picks.push(await api('picks',{method:'POST',body:{name:note,amount,exact,tagId,accountId}})); render(); }
   }catch(e){fail(e)}
